@@ -5,6 +5,7 @@ import { RepoInput } from "@/components/RepoInput";
 import { ReadmePreview } from "@/components/ReadmePreview";
 import { AuthButton } from "@/components/AuthButton";
 import { useAuth } from "@/components/AuthProvider";
+import type { ReadmeOptions } from "@/components/CustomizationOptions";
 
 export default function Home() {
   const { session, signInWithGitHub } = useAuth();
@@ -18,7 +19,7 @@ export default function Home() {
   } | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
-  async function handleGenerate(repoUrl: string) {
+  async function handleGenerate(repoUrl: string, options: ReadmeOptions) {
     setLoading(true);
     setError("");
     setReadme("");
@@ -33,7 +34,7 @@ export default function Home() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers,
-        body: JSON.stringify({ repoUrl }),
+        body: JSON.stringify({ repoUrl, options }),
       });
 
       const data = await res.json();

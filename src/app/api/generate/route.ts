@@ -61,7 +61,14 @@ function getAnonymousId(req: NextRequest): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { repoUrl } = await req.json();
+    const { repoUrl, options } = await req.json();
+
+    const tone: string = options?.tone || "professional";
+    const sections: string[] = options?.sections || [
+      "badges", "features", "demo", "installation", "usage",
+      "configuration", "api", "contributing", "license",
+    ];
+    const badgeStyle: string = options?.badgeStyle || "flat";
 
     if (!repoUrl || typeof repoUrl !== "string") {
       return NextResponse.json(
@@ -115,6 +122,32 @@ export async function POST(req: NextRequest) {
     // Fetch repo context from GitHub API
     const context = await fetchRepoContext(owner, repo.replace(/\.git$/, ""));
 
+    // Build section list for the prompt
+    const sectionMap: Record<string, string> = {
+      badges: `Project title with badges (build status, license, version) using shields.io style="${badgeStyle}"`,
+      features: "Short description and key features",
+      demo: "Screenshots/demo placeholder",
+      installation: "Installation instructions",
+      usage: "Usage examples",
+      configuration: "Configuration/environment variables",
+      api: "API reference (if applicable)",
+      contributing: "Contributing guidelines",
+      license: "License",
+    };
+    const sectionList = sections
+      .filter((s) => sectionMap[s])
+      .map((s) => `- ${sectionMap[s]}`)
+      .join("\n");
+
+    const toneInstructions: Record<string, string> = {
+      professional:
+        "Use a professional, polished tone. Be thorough and well-structured.",
+      casual:
+        "Use a friendly, conversational tone. Keep it approachable and fun while still informative.",
+      minimal:
+        "Be extremely concise. Use short sentences, minimal prose, and focus on essential information only.",
+    };
+
     // Generate README with Claude
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -122,7 +155,9 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "user",
-          content: `You are an expert technical writer. Generate a professional, comprehensive README.md for the following GitHub repository.
+          content: `You are an expert technical writer. Generate a README.md for the following GitHub repository.
+
+Tone: ${toneInstructions[tone] || toneInstructions.professional}
 
 Repository: ${owner}/${repo}
 Description: ${context.description || "No description provided"}
@@ -136,18 +171,12 @@ ${context.tree.join("\n")}
 
 ${context.packageJson ? `package.json:\n${context.packageJson}` : ""}
 
-Generate a complete README.md with these sections:
-- Project title with badges (build status, license, version)
-- Short description and key features
-- Screenshots/demo placeholder
-- Installation instructions
-- Usage examples
-- Configuration/environment variables
-- API reference (if applicable)
-- Contributing guidelines
-- License
+Generate a README.md with ONLY these sections:
+${sectionList}
 
-Use proper markdown formatting. Make it professional and inviting.`,
+${sections.includes("badges") ? `For badges, use the shields.io "${badgeStyle}" style (e.g., ?style=${badgeStyle}).` : "Do not include any badges."}
+
+Use proper markdown formatting. Output only the README content, no explanations.`,
         },
       ],
     });
