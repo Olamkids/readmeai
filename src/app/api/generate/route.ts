@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import Groq from "groq-sdk";
 import { fetchRepoContext } from "@/lib/github";
 import { createSupabaseAdmin } from "@/lib/supabase-server";
 
-const anthropic = new Anthropic();
+let _groq: Groq | null = null;
+function getGroq() {
+  if (!_groq) _groq = new Groq();
+  return _groq;
+}
 const FREE_GENERATION_LIMIT = 3;
 
 async function checkUsageLimit(
@@ -148,14 +152,18 @@ export async function POST(req: NextRequest) {
         "Be extremely concise. Use short sentences, minimal prose, and focus on essential information only.",
     };
 
-    // Generate README with Claude
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+    // Generate README with Groq
+    const chatCompletion = await getGroq().chat.completions.create({
+      model: "llama-3.3-70b-versatile",
       max_tokens: 4096,
       messages: [
         {
+          role: "system",
+          content: "You are an expert technical writer. Output only the README content in markdown, no explanations.",
+        },
+        {
           role: "user",
-          content: `You are an expert technical writer. Generate a README.md for the following GitHub repository.
+          content: `Generate a README.md for the following GitHub repository.
 
 Tone: ${toneInstructions[tone] || toneInstructions.professional}
 
@@ -176,13 +184,12 @@ ${sectionList}
 
 ${sections.includes("badges") ? `For badges, use the shields.io "${badgeStyle}" style (e.g., ?style=${badgeStyle}).` : "Do not include any badges."}
 
-Use proper markdown formatting. Output only the README content, no explanations.`,
+Use proper markdown formatting.`,
         },
       ],
     });
 
-    const readme =
-      message.content[0].type === "text" ? message.content[0].text : "";
+    const readme = chatCompletion.choices[0]?.message?.content ?? "";
 
     // Record the generation
     await recordGeneration(supabase, userId, anonymousId, repoUrl);
