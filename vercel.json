@@ -3,16 +3,5 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "installCommand": "npm install",
-  "regions": ["iad1"],
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@readmeai-supabase-url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@readmeai-supabase-anon-key",
-    "SUPABASE_SERVICE_ROLE_KEY": "@readmeai-supabase-service-role-key",
-    "ANTHROPIC_API_KEY": "@readmeai-anthropic-api-key",
-    "STRIPE_SECRET_KEY": "@readmeai-stripe-secret-key",
-    "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": "@readmeai-stripe-publishable-key",
-    "STRIPE_WEBHOOK_SECRET": "@readmeai-stripe-webhook-secret",
-    "STRIPE_PRICE_ID": "@readmeai-stripe-price-id",
-    "GITHUB_TOKEN": "@readmeai-github-token"
-  }
+  "regions": ["iad1"]
 }
