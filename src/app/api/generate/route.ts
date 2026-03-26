@@ -1,23 +1,101 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchRepoContext } from "@/lib/github";
+import { createSupabaseAdmin } from "@/lib/supabase-server";
 
 const anthropic = new Anthropic();
+const FREE_GENERATION_LIMIT = 3;
+
+async function checkUsageLimit(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  userId: string | null,
+  anonymousId: string
+): Promise<{ allowed: boolean; used: number }> {
+  // Authenticated users with a subscription get unlimited (handled by Stripe later)
+  // For now, all users (auth or anon) share the same free limit
+  const column = userId ? "user_id" : "anonymous_id";
+  const value = userId ?? anonymousId;
+
+  const { count } = await supabase
+    .from("generations")
+    .select("*", { count: "exact", head: true })
+    .eq(column, value);
+
+  const used = count ?? 0;
+  return { allowed: used < FREE_GENERATION_LIMIT, used };
+}
+
+async function recordGeneration(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  userId: string | null,
+  anonymousId: string,
+  repoUrl: string
+) {
+  await supabase.from("generations").insert({
+    user_id: userId,
+    anonymous_id: userId ? null : anonymousId,
+    repo_url: repoUrl,
+  });
+}
+
+function getAnonymousId(req: NextRequest): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  const ip = forwarded?.split(",")[0]?.trim() ?? "unknown";
+  return ip;
+}
 
 export async function POST(req: NextRequest) {
   try {
     const { repoUrl } = await req.json();
 
     if (!repoUrl || typeof repoUrl !== "string") {
-      return NextResponse.json({ error: "Repository URL is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Repository URL is required" },
+        { status: 400 }
+      );
     }
 
     // Parse GitHub URL
     const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
     if (!match) {
-      return NextResponse.json({ error: "Invalid GitHub repository URL" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid GitHub repository URL" },
+        { status: 400 }
+      );
     }
     const [, owner, repo] = match;
+
+    const supabase = createSupabaseAdmin();
+
+    // Check auth: extract user from Authorization header (bearer token)
+    let userId: string | null = null;
+    const authHeader = req.headers.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser(token);
+      userId = user?.id ?? null;
+    }
+
+    const anonymousId = getAnonymousId(req);
+
+    // Check usage limit
+    const { allowed, used } = await checkUsageLimit(
+      supabase,
+      userId,
+      anonymousId
+    );
+    if (!allowed) {
+      return NextResponse.json(
+        {
+          error: `Free limit reached (${FREE_GENERATION_LIMIT} generations). Sign in or upgrade to Pro for unlimited access.`,
+          used,
+          limit: FREE_GENERATION_LIMIT,
+        },
+        { status: 429 }
+      );
+    }
 
     // Fetch repo context from GitHub API
     const context = await fetchRepoContext(owner, repo.replace(/\.git$/, ""));
@@ -62,7 +140,10 @@ Use proper markdown formatting. Make it professional and inviting.`,
     const readme =
       message.content[0].type === "text" ? message.content[0].text : "";
 
-    return NextResponse.json({ readme });
+    // Record the generation
+    await recordGeneration(supabase, userId, anonymousId, repoUrl);
+
+    return NextResponse.json({ readme, used: used + 1, limit: FREE_GENERATION_LIMIT });
   } catch (err: unknown) {
     console.error("Generate error:", err);
     const msg = err instanceof Error ? err.message : "Internal server error";
