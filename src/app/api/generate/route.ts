@@ -10,9 +10,24 @@ async function checkUsageLimit(
   supabase: ReturnType<typeof createSupabaseAdmin>,
   userId: string | null,
   anonymousId: string
-): Promise<{ allowed: boolean; used: number }> {
-  // Authenticated users with a subscription get unlimited (handled by Stripe later)
-  // For now, all users (auth or anon) share the same free limit
+): Promise<{ allowed: boolean; used: number; isPro: boolean }> {
+  // Pro subscribers get unlimited generations
+  if (userId) {
+    const { data: sub } = await supabase
+      .from("subscriptions")
+      .select("status")
+      .eq("user_id", userId)
+      .single();
+
+    if (sub?.status === "active") {
+      const { count } = await supabase
+        .from("generations")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId);
+      return { allowed: true, used: count ?? 0, isPro: true };
+    }
+  }
+
   const column = userId ? "user_id" : "anonymous_id";
   const value = userId ?? anonymousId;
 
@@ -22,7 +37,7 @@ async function checkUsageLimit(
     .eq(column, value);
 
   const used = count ?? 0;
-  return { allowed: used < FREE_GENERATION_LIMIT, used };
+  return { allowed: used < FREE_GENERATION_LIMIT, used, isPro: false };
 }
 
 async function recordGeneration(
@@ -81,7 +96,7 @@ export async function POST(req: NextRequest) {
     const anonymousId = getAnonymousId(req);
 
     // Check usage limit
-    const { allowed, used } = await checkUsageLimit(
+    const { allowed, used, isPro } = await checkUsageLimit(
       supabase,
       userId,
       anonymousId
@@ -143,7 +158,12 @@ Use proper markdown formatting. Make it professional and inviting.`,
     // Record the generation
     await recordGeneration(supabase, userId, anonymousId, repoUrl);
 
-    return NextResponse.json({ readme, used: used + 1, limit: FREE_GENERATION_LIMIT });
+    return NextResponse.json({
+      readme,
+      used: used + 1,
+      limit: isPro ? null : FREE_GENERATION_LIMIT,
+      isPro,
+    });
   } catch (err: unknown) {
     console.error("Generate error:", err);
     const msg = err instanceof Error ? err.message : "Internal server error";
